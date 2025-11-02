@@ -3,6 +3,12 @@
 Automate Jira issue notifications into **Matrix direct messages** using an **n8n** workflow.  
 Resilient by design: retries, rate-limit handling, room discovery/creation, and caching.
 
+## 🖥️Demo
+<img width="1705" height="729" alt="image" src="https://github.com/user-attachments/assets/0923f26f-3fea-4f2c-9e86-3c430fdec072" />
+<img width="1664" height="538" alt="Screenshot 2025-11-02 174237" src="https://github.com/user-attachments/assets/462fedb5-03d9-49e0-88b7-22940aa0c6dd" />
+<img width="1302" height="539" alt="Screenshot 2025-11-02 174300" src="https://github.com/user-attachments/assets/2edf0599-44dd-42bd-8965-0dddb558c64f" />
+<img width="600" height="350" alt="Screenshot 2025-11-02 174317" src="https://github.com/user-attachments/assets/65e45410-2934-47c3-a045-70b51584f0b6" />
+
 ## ✨ Features
 - Sends Jira events to the right Matrix user via **direct chats**
 - **Room discovery** (reuse) or **on-demand creation** (trusted_private_chat)
