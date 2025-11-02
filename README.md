@@ -14,8 +14,8 @@ Resilient by design: retries, rate-limit handling, room discovery/creation, and 
 This repo includes a sanitized n8n workflow JSON and a `.env.example`.  
 All secrets and internal hosts are templated out with placeholders.
 
-- `workflows/n8n-jira-to-matrix.sanitized.json`  
-- `env/.env.example`
+- `n8n-jira-to-matrix.sanitized.json`  
+- `.env.example`
 
 > Example placeholders:
 > - `{{MATRIX_BASE_URL}}`, `{{MATRIX_DOMAIN}}`
@@ -28,7 +28,7 @@ All secrets and internal hosts are templated out with placeholders.
 
 1. **Import** the workflow into n8n (Import → From File/URL).  
 2. **Provide configuration** via n8n Credentials or environment variables:
-   - If using env vars, copy `env/.env.example` to `.env` and fill in values.
+   - If using env vars, copy `.env.example` to `.env` and fill in values.
    - Reference them in nodes using expressions: `{{$env.MATRIX_BASE_URL}}`, etc.
 3. **Set Jira Webhook** to post events to the n8n Webhook node path you configure.
 4. **Enable** the workflow and test with a sample Jira event.
