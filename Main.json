@@ -1,0 +1,2872 @@
+{
+  "name": "Jira Notifications to Matrix",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "={{MATRIX_BASE_URL}}/_matrix/client/v3/profile/{{ encodeURIComponent( $json.matrixUser ) }}",
+        "options": {
+          "fullResponse": true
+        },
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{MATRIX_ACCESS_TOKEN}}"
+            }
+          ]
+        }
+      },
+      "id": "6b614b2b-00b0-41ad-8cdd-379efb5840e6",
+      "name": "Check Matrix Profile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        -2448,
+        4496
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.statusCode }}",
+              "operation": "equal",
+              "value2": 200
+            }
+          ]
+        }
+      },
+      "id": "3c4b1ec1-2c59-4875-8a1b-e9e051d34e59",
+      "name": "Profile Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -1760,
+        4384
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{MATRIX_BASE_URL}}/_matrix/client/v3/rooms/{{ $json.room_id }}/joined_members",
+        "options": {
+          "fullResponse": true
+        },
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{MATRIX_ACCESS_TOKEN}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        }
+      },
+      "id": "1010e2ac-07b3-4be7-abdf-34db6d276584",
+      "name": "Get Room Members",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        240,
+        4192
+      ],
+      "alwaysOutputData": false,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "requestMethod": "PUT",
+        "url": "={{MATRIX_BASE_URL}}/_matrix/client/v3/rooms/{{ $json.room_id }}/send/m.room.message/{{ $json.txnId }}",
+        "options": {
+          "fullResponse": true
+        },
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "msgtype",
+              "value": "m.text"
+            },
+            {
+              "name": "body",
+              "value": "={{ $json.message }}"
+            }
+          ]
+        },
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{MATRIX_ACCESS_TOKEN}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        }
+      },
+      "id": "0d4224b3-0310-49c6-8e80-ff1e9de34234",
+      "name": "Send Message to DM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        4064,
+        3952
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "# 📢 Jira Notifications to Matrix\n\n## 📝 Overview\n### This workflow automates the delivery of Jira notifications to Matrix users via direct chats.  \n### It ensures that messages from Jira are reliably sent to the intended recipients on the Matrix server, handling room discovery, creation, caching, and error management.  \n### The workflow incorporates retries, random waits, and data table caching for robustness and scalability.\n\n## 📂 Get Jira User Rooms\n### 🔍 Purpose\n### Fetch all rooms that the Jira bot is a member of.  \n### ⚙️ Details\n### - Sends an HTTP request to the Matrix API endpoint `/joined_rooms`.  \n### - Handles errors and retries via the `Check HTTP Result and Retry2` node.  \n### - Prepares a list of room IDs for further processing.\n\n## 🔀 Split & Attach Auth\n### 🔑 Purpose\n### Prepare individual room IDs for processing and attach necessary authentication.  \n### ⚙️ Details\n### - `Code for Splitting the Array` splits the array of joined rooms into individual items.  \n### - `Attach Auth` assigns the Jira bot’s access token to each room item for subsequent API calls.\n\n## 👥 Get Room Members\n### 🔍 Purpose\n### Retrieve all members in each room to determine if a direct chat exists with the target user.  \n### ⚙️ Details\n### - Sends a request to `/rooms/{room_id}/joined_members`.  \n### - Handles retries, rate limits, and server errors with `Check HTTP Result and Retry1`.  \n### - Ensures accurate detection of existing direct chats.\n\n## 🔍 Filter Direct Chats\n### 🔑 Purpose\n### Identify rooms that are direct chats between the Jira bot and the target user.  \n### ⚙️ Details\n### - Checks that exactly 2 members exist: the Jira bot and the target Matrix user.  \n### - Marks these rooms as `isDirectChat: true` and passes them downstream for messaging.  \n### - Rooms without a direct chat trigger creation.\n\n## 🏗 Room Found or Create?\n### 🔄 Purpose\n### Decide whether to use an existing room or create a new direct chat.  \n### ⚙️ Details\n### - If a direct chat exists → cache `room_id` in the data table and proceed.  \n### - If no direct chat → trigger the `Create Room` branch for a new room.  \n### - Uses conditional branching to handle both cases efficiently.\n\n## 🆕 Create Room\n### ✨ Purpose\n### Create a new Matrix direct chat if one does not exist.  \n### ⚙️ Details\n### - Sets `preset` to `trusted_private_chat` and invites the target user.  \n### - Handles API responses and errors via `Check HTTP Result and Retry3`.  \n### - Successful room creation is cached in the data table and prepared for messaging.\n\n## 💾 Cache & Set room_id\n### 🔑 Purpose\n### Store the resolved room ID for reliable messaging.  \n### ⚙️ Details\n### - `Update Data Table` saves `matrixUser` and `room_id` for future notifications.  \n### - `Set room_id` nodes attach the room information and access tokens for message sending.  \n### - Ensures that future notifications can bypass room creation if already available.\n\n## 🔗 Merge & Wait\n### ⏳ Purpose\n### Synchronize multiple branches and avoid request collisions.  \n### ⚙️ Details\n### - `Merge Creation Branches` combines paths from existing and newly created rooms.  \n### - Randomized wait times (`random wait` and `Wait` nodes) prevent API rate-limit issues.  \n### - Guarantees smooth execution even under heavy load.\n\n## 💡 Error Handling\n### ⚙️ Purpose\n### Ensure robust operation under network errors, rate limits, and unexpected conditions.  \n### ⚙️ Details\n### - Multiple `Check HTTP Result and Retry` nodes detect HTTP status codes:  \n###   - ✅ Success (200–202) → proceed.  \n###   - ⏳ Retryable errors (429, 5xx) → wait and retry.  \n###   - ❌ Fatal errors → mark as dropped to avoid infinite loops.  \n### - Conditional switches route items to proper branches (`ok`, `retry`, `drop`, `createRoom`).  \n\n## 🎯 Workflow Goal\n### Deliver Jira notifications to the correct Matrix users via direct chats **reliably and automatically**, minimizing API errors and maintaining an up-to-date cache of rooms and users.  \n\n## 🛡 Key Features\n### - Automatic discovery of existing direct chats  \n### - Room creation with proper presets and invitations  \n### - Robust retry logic for rate limits and server errors  \n### - Caching of room IDs for future notifications  \n### - Randomized waits to prevent collisions and API throttling  \n### - Centralized handling of both success and failure paths  \n\n## 🔗 Conclusion\n### This workflow ensures that Jira notifications reach Matrix users efficiently and reliably, automating the full cycle from room discovery to message delivery.  \n### It is designed to handle high-volume notifications while maintaining data integrity and minimizing API errors.\n",
+        "height": 2928,
+        "width": 3168,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -4608,
+        -176
+      ],
+      "id": "22888678-ae8e-4bea-852c-c7d12af2d84a",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "url": "{{MATRIX_BASE_URL}}/_matrix/client/v3/joined_rooms",
+        "options": {
+          "fullResponse": true
+        },
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{MATRIX_ACCESS_TOKEN}}"
+            }
+          ]
+        }
+      },
+      "id": "cca98b66-0eb7-4ca4-8e8c-c12822c6096e",
+      "name": "Get Jira user Rooms",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        -1008,
+        4368
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "id": "e05139f7-8e69-4a52-840c-6350840ba60d",
+      "name": "Dropped (User Not Exist)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -1584,
+        4528
+      ]
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "{{MATRIX_BASE_URL}}/_matrix/client/v3/createRoom",
+        "jsonParameters": true,
+        "options": {
+          "fullResponse": true
+        },
+        "bodyParametersJson": "={\n  \"invite\": [\"{{$json.targetUser}}\"],\n  \"is_direct\": {{ $json.isDirectChat !== undefined ? $json.isDirectChat : true }},\n  \"preset\": \"trusted_private_chat\"\n}\n",
+        "headerParametersJson": "={{ { \"Authorization\": \"Bearer \" + $json.access_token } }}"
+      },
+      "id": "fb049e85-51df-4f68-b25d-245f3d68c0d8",
+      "name": "Create Room",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        1936,
+        4192
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "vhi9aOU26TGEWQgz",
+          "mode": "list",
+          "cachedResultName": "matrixUsers and RoomIDs",
+          "cachedResultUrl": "/projects/AmDelcKINuc4Fqth/datatables/vhi9aOU26TGEWQgz"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "matrixUser",
+              "keyValue": "={{ $json.matrixUser }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "matrixUser": "={{ $json.matrixUser }}",
+            "room_id": "={{ $json.room_id }}",
+            "email": "={{ $json.email }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "matrixUser",
+              "displayName": "matrixUser",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "room_id",
+              "displayName": "room_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        2688,
+        3952
+      ],
+      "id": "1e73de30-4056-4daa-b840-2533f9509b74",
+      "name": "Update Data Table"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === CONFIG ===\nconst MATRIX_DOMAIN = \"{{MATRIX_DOMAIN}}\";\nconst results = [];\nconst seen = new Set(); // For deduping recipients\n\n// Get options from first item (runtime config)\nconst opts = items[0].json.options || {\n  includeAssignee: true,\n  includeReporter: true,\n  includeComment: true,\n  format: 'text',\n  importance: ''\n};\n\n// Recursive function to find access_token\nfunction findAccessToken(obj) {\n  if (!obj || typeof obj !== 'object') return null;\n  if (obj.access_token) return obj.access_token;\n  for (const key in obj) {\n    const found = findAccessToken(obj[key]);\n    if (found) return found;\n  }\n  return null;\n}\n\nconst access_token = items.map(i => findAccessToken(i.json)).find(Boolean) || null;\n\n/**\n * NEW: HTML entity decoder for comments\n * - تبدیل NBSP و سایر entityها به متن عادی\n */\nfunction decodeHtml(str) {\n  return String(str)\n    .replace(/&nbsp;|&#160;|&#xA0;/gi, ' ')\n    .replace(/\\u00A0/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;|&apos;/g, \"'\")\n    .replace(/&#(\\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))\n    .replace(/&#x([\\da-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)));\n}\n\nfor (const item of items) {\n  const input = item.json || {};\n  const body = input.body || {};\n  const issue = body.issue || {};\n  const fields = issue.fields || {};\n\n  if (!body.webhookEvent && !issue.key) {\n    console.log('⚠️ Skipping item: no webhook event or issue key');\n    continue;\n  }\n\n  // Extract reporter and assignee information\n  const assigneeUser = fields.assignee || {};\n  const reporterUser = fields.reporter || {};\n  const actor = body.user?.displayName || body.user?.name || \"Unknown User\";\n\n  const assigneeName = assigneeUser.displayName || assigneeUser.name || \"Unassigned\";\n  const reporterName = reporterUser.displayName || reporterUser.name || \"Unknown Reporter\";\n\n  // Build the base message (status/priority/reporter/assignee removed by request)\n  const key = issue.key || \"UNKNOWN\";\n  const summary = fields.summary || \"No summary\";\n  const status = fields.status?.name || \"Unknown\";   // kept variables but not used in message\n  const priority = fields.priority?.name || \"Unknown\";\n  const eventType = body.webhookEvent || \"unknown\";\n  const eventName = body.issue_event_type_name || eventType;\n\n  let baseMessage = `${opts.importance ? opts.importance + ': ' : ''}🔔 Jira Notification\\n\\n`;\n  baseMessage += `📋 Issue: [${key}] ${summary}\\n`;\n  baseMessage += `📌 Event: ${eventName}\\n`;\n  baseMessage += `✏️ Action by: ${actor}\\n`;\n\n  // ---- CHANGED: make cleanComment decode HTML entities & tidy whitespace\n  if (opts.includeComment && body.comment?.body) {\n    const cleanComment = decodeHtml(\n      String(body.comment.body)\n        .replace(/<[^>]*>/g, '')   // strip HTML tags\n        .replace(/\\r\\n/g, '\\n')    // normalize newlines\n    )\n      .replace(/[ \\t]+\\n/g, '\\n')  // trim trailing spaces per line\n      .replace(/\\n{3,}/g, '\\n\\n')  // collapse excessive blank lines\n      .trim();\n\n    if (cleanComment) {\n      baseMessage += `💬 Comment: \"${cleanComment}\"\\n`;\n    }\n  }\n  // ---- END CHANGED\n\n  baseMessage += `\\n🔗 Link: {{JIRA_BASE_URL}}/browse/${key}`;\n\n  if (opts.format === 'html') {\n    baseMessage = baseMessage.replace(/\\n/g, '<br>');\n  }\n\n  // Collect potential recipients\n  const recipients = [];\n\n  if (opts.includeAssignee && assigneeUser.emailAddress) {\n    recipients.push({\n      user: assigneeUser,\n      role: 'assignee'\n    });\n  }\n\n  if (opts.includeReporter && reporterUser.emailAddress) {\n    recipients.push({\n      user: reporterUser,\n      role: 'reporter'\n    });\n  }\n\n  console.log(`📊 Processing ${recipients.length} potential recipients for ${key}`);\n\n  // Process each unique recipient\n  for (const { user, role } of recipients) {\n    let email = user.emailAddress || '';\n    let username = user.name || '';\n    let finalUsername = email.split('@')[0] || username;\n    finalUsername = String(finalUsername).trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');\n    if (!finalUsername) {\n      console.log(`⚠️ Skipping invalid username for ${role}: email=${email}, username=${username}`);\n      continue;\n    }\n    const matrixUser = `@${finalUsername}:${MATRIX_DOMAIN}`;\n\n    if (seen.has(matrixUser)) {\n      console.log(`✓ Deduped: ${matrixUser} (user is both reporter and assignee)`);\n      continue;\n    }\n    seen.add(matrixUser);\n\n    let personalizedMessage = baseMessage;\n    /**\n     * \n     \n    if (role === 'assignee') {\n      personalizedMessage = `👤 You are assigned to this issue\\n\\n` + personalizedMessage;\n    } else if (role === 'reporter') {\n      personalizedMessage = `📝 You reported this issue\\n\\n` + personalizedMessage;\n    }\n*/\n    const txnId = `jira_${issue.key}_${eventType}_${finalUsername}_${Date.now()}`;\n\n    const result = {\n      ...input,\n      jiraUsername: finalUsername,\n      matrixUser,\n      email,\n      message: personalizedMessage,\n      txnId,\n      issueKey: key,\n      eventType,\n      recipientRole: role,\n      assigneeName,\n      reporterName,\n      access_token: access_token || input.accessToken\n    };\n\n    results.push({ json: result });\n    console.log(`✓ Added recipient: ${matrixUser} (${role})`);\n  }\n}\n\nif (results.length === 0) {\n  console.log('⚠️ No valid recipients found');\n  return [{ json: { error: \"No valid Jira payload or recipients found\" } }];\n}\n\nconsole.log(`✅ Total recipients to process: ${results.length}`);\nreturn results;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3632,
+        4416
+      ],
+      "id": "17b69988-c3c6-4147-bd2b-d3c31d0e9daf",
+      "name": "Jira user to Matrix user"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Get the joined members object\nconst joinedMembers = $json.body?.joined || $json.body?.joined_members || {};\nconst memberIds = Object.keys(joinedMembers);\n\n// Use current item's targetUser\nconst targetUser = $json.matrixUser;\n\n// Ensure we have room_id available\nconst room_id = $json.room_id;\n\nconst jrabot = \"@jira:{{MATRIX_DOMAIN}}\";\nconst isDirectChatRoom = memberIds.length === 2 && memberIds.includes(targetUser) && memberIds.includes(jrabot);\n\nconst finalRoomID = isDirectChatRoom ? room_id : null;\n\n// Return enriched, propagating data\nreturn { ...$json, isDirectChat: isDirectChatRoom, room_id: finalRoomID, memberIds, targetUser, matrixUser: targetUser };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        4000
+      ],
+      "id": "a800e745-5f08-4e80-ba11-924341dc3bf1",
+      "name": "Finding the room"
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\n\nfor (const item of items) {\n  const rooms = item.json.body?.joined_rooms || [];\n  \n  if (rooms.length === 0) {\n    out.push({\n      json: {\n        room_id: null,\n        note: 'No joined rooms found',\n        matrixUser: item.json.matrixUser,\n        targetUser: item.json.matrixUser,\n        message: item.json.message,\n        txnId: item.json.txnId,\n        email: item.json.email,\n        access_token: item.json.access_token\n      }\n    });\n  } else {\n    rooms.forEach(id => {\n      out.push({\n        json: {\n          room_id: id,\n          matrixUser: item.json.matrixUser,\n          targetUser: item.json.matrixUser,\n          message: item.json.message,\n          txnId: item.json.txnId,\n          email: item.json.email,\n          access_token: item.json.access_token\n        }\n      });\n    });\n  }\n}\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        4192
+      ],
+      "id": "b7a8950a-3f6c-481e-8bfd-c00a4ad7c0f6",
+      "name": "Code for Splitting the Array"
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "room_id",
+              "value": "={{ $('Merge').item.json.room_id }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $('Merge').item.json.message }}"
+            },
+            {
+              "name": "txnId",
+              "value": "={{ $('Merge').item.json.txnId }}"
+            },
+            {
+              "name": "matrixUser",
+              "value": "={{ $json.matrixUser }}"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $('Merge DATA').first().json.access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "57379e51-40c6-4d80-a966-9662aba21cfb",
+      "name": "Set room_id from Table",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        896,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "room_id",
+              "value": "={{ $json.room_id }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $('Preserve after Create').item.json.message }}"
+            },
+            {
+              "name": "matrixUser",
+              "value": "={{ $json.matrixUser }}"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $('Preserve after Create').item.json.access_token }}"
+            },
+            {
+              "name": "txnId",
+              "value": "={{ $('Preserve after Create').item.json.txnId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "98c5f6f6-11f5-471d-b8d6-4d772e7b1371",
+      "name": "Set room_id after creation",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        2912,
+        3952
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter to find direct chats from all processed rooms\n// This node \"fans-in\" the data, reducing N items (users*rooms)\n// back down to 1 item per user.\nconst inputItems = $input.all();\n\nif (inputItems.length === 0) {\n  console.log('No items to process.');\n  return [];\n}\n\n// Group items by matrixUser to process each recipient separately\nconst groupedByUser = inputItems.reduce((acc, item) => {\n  const matrixUser = item.json.matrixUser;\n  if (!matrixUser) {\n    console.warn('Skipping item with missing matrixUser:', item.json);\n    return acc;\n  }\n  if (!acc[matrixUser]) {\n    acc[matrixUser] = [];\n  }\n  acc[matrixUser].push(item);\n  return acc;\n}, {});\n\nconst results = [];\n\n// Now, loop through each *group* (e.g., one group for 'i.shakeri', one for 'esmaeili')\nfor (const matrixUser in groupedByUser) {\n  const userItems = groupedByUser[matrixUser];\n  \n  // 1. Find all items in this group that *are* a direct chat\n  const directChats = userItems.filter(item => item.json.isDirectChat === true);\n  \n  // 2. Get the base data (message, txnId, etc.) for this user\n  // We just take it from the first item in their group.\n  const userData = userItems[0].json;\n\n  // *** THIS IS THE FIX ***\n  // This check is now *inside* the loop, where 'userData' is defined.\n  if (!userData.message) {\n    console.log('Warning: Missing message data for ' + matrixUser);\n  }\n\n  console.log(`Processing ${matrixUser}: ${userItems.length} rooms checked, ${directChats.length} direct chats found`);\n\n  if (directChats.length > 0) {\n    // 3a. Found an existing DM!\n    // The item 'directChats[0]' contains everything we need.\n    console.log(`✅ Using existing room: ${directChats[0].json.room_id} for ${matrixUser}`);\n    results.push(directChats[0]);\n\n  } else {\n    // 3b. No DM found for this user.\n    // We must create one.\n    console.log(`🆕 Need to create room for: ${matrixUser}`);\n    results.push({\n      json: {\n        // Pass all original data from the *first item* in this user's group\n        ...userData, \n        // Overwrite/set the keys we care about\n        room_id: null,\n        needsCreation: true,\n      }\n    });\n  }\n}\n\nconsole.log(`Total recipients to process: ${results.length}`);\nreturn results;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        4000
+      ],
+      "id": "bd5b3ee9-c12d-4cb9-9674-5612409bc635",
+      "name": "Filter Direct Chats"
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "vhi9aOU26TGEWQgz",
+          "mode": "list",
+          "cachedResultName": "matrixUsers and RoomIDs",
+          "cachedResultUrl": "/projects/AmDelcKINuc4Fqth/datatables/vhi9aOU26TGEWQgz"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "matrixUser",
+              "keyValue": "={{ $json.matrixUser }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "matrixUser": "={{ $json.matrixUser }}",
+            "room_id": "={{ $json.room_id }}",
+            "email": "={{ $json.email }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "matrixUser",
+              "displayName": "matrixUser",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "room_id",
+              "displayName": "room_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        1776,
+        4464
+      ],
+      "id": "725d769b-2015-48e8-ac14-b9cbd2fcdd27",
+      "name": "Cache room_id in Table"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "{{MATRIX_BASE_URL}}/_matrix/client/v3/login",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"type\": \"m.login.password\",\n  \"user\": \"{{MATRIX_BOT_USERNAME}}\",\n  \"password\": \"{{MATRIX_BOT_PASSWORD}}\"\n}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -4992,
+        4304
+      ],
+      "id": "68183f2a-2e1f-4ee0-a471-9369fe999116",
+      "name": "Login and get access token",
+      "alwaysOutputData": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -4224,
+        4464
+      ],
+      "id": "490f5ea9-c00b-40f8-ad92-aac11c41baa4",
+      "name": "Wait",
+      "webhookId": "9ebd3b28-31d8-40f6-b826-4a099775e0c9"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1584,
+        4672
+      ],
+      "id": "beb85058-494d-46c2-ba04-2ed4753be030",
+      "name": "Wait1",
+      "webhookId": "7c83d998-e1dc-4f95-9dfc-170ff2ee10b5"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Unified HTTP response handler for Matrix requests\n * Works with the \"check room result\" Switch node.\n *\n * Expected input: each item has { statusCode, body, headers?, retryCount?, maxRetries? }\n * Returns items with json.result = \"ok\" | \"retry\" | \"createRoom\"\n */\n\nconst out = [];\n\nfor (const item of items) {\n  const sc = Number(item.json.statusCode || 0);\n  const retryCount = Number(item.json.retryCount || 0);\n  const maxRetries = Number(item.json.maxRetries || 3);\n\n  // ✅ Successful response\n  if ([200, 201, 202].includes(sc)) {\n    item.json.result = \"ok\";\n    out.push(item);\n    continue;\n  }\n\n  // 🟡 Room not found → create new room\n  if (sc === 404) {\n    item.json.result = \"createRoom\";\n    out.push(item);\n    continue;\n  }\n\n  // ⏳ Retryable errors: rate-limit or server errors\n  if (sc === 429 || sc >= 500) {\n    if (retryCount < maxRetries) {\n      const base = sc === 429 ? 1000 : 2000;             // base wait time in ms\n      const jitter = Math.floor(Math.random() * base);   // random jitter\n      item.json.waitMs = base + jitter;\n      item.json.retryCount = retryCount + 1;\n      item.json.result = \"retry\";\n      out.push(item);\n      continue;\n    }\n  }\n\n  // ❌ Any other response → treat as \"createRoom\" to avoid infinite loop\n  item.json.result = \"createRoom\";\n  out.push(item);\n}\n\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        4192
+      ],
+      "id": "f9f1e7d5-afcb-465b-82d0-f0410e05c8c7",
+      "name": "Check HTTP Result and Retry1"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1104,
+        4336
+      ],
+      "id": "5352ca7f-7c09-46a4-9f91-c3e50f08cfe0",
+      "name": "Wait2",
+      "webhookId": "7c83d998-e1dc-4f95-9dfc-170ff2ee10b5"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Unified HTTP response handler for Matrix/Jira requests\n * Handles success, rate-limit, server error, and fatal errors in one node.\n * \n * Expected input: each item has { statusCode, body, headers?, retryCount?, maxRetries? }\n * Returns:\n *   - on success → same item, with `result: \"ok\"`\n *   - on retry → same item, with `result: \"retry\"`, `waitMs` set (ms to sleep)\n *   - on fatal → same item, with `result: \"drop\"`\n */\n\nconst out = [];\n\nfor (const item of items) {\n  const sc = Number(item.json.statusCode || 0);\n  const retryCount = Number(item.json.retryCount || 0);\n  const maxRetries = Number(item.json.maxRetries || 3);\n\n  if ([200, 201, 202].includes(sc)) {\n    // ✅ Success\n    item.json.result = \"ok\";\n    out.push(item);\n    continue;\n  }\n\n  if (sc === 429 || sc >= 500) {\n    // ⏳ Retryable error\n    if (retryCount < maxRetries) {\n      const base = sc === 429 ? 1000 : 2000;             // base wait\n      const jitter = Math.floor(Math.random() * base);   // add randomness\n      item.json.waitMs = base + jitter;\n      item.json.retryCount = retryCount + 1;\n      item.json.result = \"retry\";\n      out.push(item);\n      continue;\n    }\n  }\n\n  // ❌ Fatal / too many retries\n  item.json.result = \"drop\";\n  out.push(item);\n}\n\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -624,
+        4368
+      ],
+      "id": "f3a2775f-9174-4f32-8501-1e9408cc133b",
+      "name": "Check HTTP Result and Retry2"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -176,
+        4544
+      ],
+      "id": "3377fadc-98e1-41f7-abb3-36fea3d36e7d",
+      "name": "Wait3",
+      "webhookId": "7c83d998-e1dc-4f95-9dfc-170ff2ee10b5"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Unified HTTP response handler for Matrix/Jira requests\n * Handles success, rate-limit, server error, and fatal errors in one node.\n * \n * Expected input: each item has { statusCode, body, headers?, retryCount?, maxRetries? }\n * Returns:\n *   - on success → same item, with `result: \"ok\"`\n *   - on retry → same item, with `result: \"retry\"`, `waitMs` set (ms to sleep)\n *   - on fatal → same item, with `result: \"drop\"`\n */\n\nconst out = [];\n\nfor (const item of items) {\n  const sc = Number(item.json.statusCode || 0);\n  const retryCount = Number(item.json.retryCount || 0);\n  const maxRetries = Number(item.json.maxRetries || 3);\n\n  if ([200, 201, 202].includes(sc)) {\n    // ✅ Success\n    item.json.result = \"ok\";\n    out.push(item);\n    continue;\n  }\n\n  if (sc === 429 || sc >= 500) {\n    // ⏳ Retryable error\n    if (retryCount < maxRetries) {\n      const base = sc === 429 ? 1000 : 2000;             // base wait\n      const jitter = Math.floor(Math.random() * base);   // add randomness\n      item.json.waitMs = base + jitter;\n      item.json.retryCount = retryCount + 1;\n      item.json.result = \"retry\";\n      out.push(item);\n      continue;\n    }\n  }\n\n  // ❌ Fatal / too many retries\n  item.json.result = \"drop\";\n  out.push(item);\n}\n\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2288,
+        4192
+      ],
+      "id": "63a27c8a-0fcd-4339-9849-48e0ec76a6c5",
+      "name": "Check HTTP Result and Retry3"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2688,
+        4256
+      ],
+      "id": "6a174753-9a6f-452f-b991-c85b51d99b67",
+      "name": "Wait4",
+      "webhookId": "7c83d998-e1dc-4f95-9dfc-170ff2ee10b5"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Unified HTTP response handler for Matrix/Jira requests\n * Handles success, rate-limit, server error, and fatal errors in one node.\n * \n * Expected input: each item has { statusCode, body, headers?, retryCount?, maxRetries? }\n * Returns:\n *   - on success → same item, with `result: \"ok\"`\n *   - on retry → same item, with `result: \"retry\"`, `waitMs` set (ms to sleep)\n *   - on fatal → same item, with `result: \"drop\"`\n */\n\nconst out = [];\n\nfor (const item of items) {\n  const sc = Number(item.json.statusCode || 0);\n  const retryCount = Number(item.json.retryCount || 0);\n  const maxRetries = Number(item.json.maxRetries || 3);\n\n  // Log input for debugging\n  console.log(`Processing item: ${JSON.stringify(item.json)}`);\n\n  // Check for Matrix success (event_id present, even if statusCode missing)\n  if (([200, 201, 202].includes(sc) || item.json.event_id) && !item.json.body?.error) {\n    // ✅ Success (HTTP 200/201/202 or event_id indicates Matrix send success)\n    item.json.result = \"ok\";\n    out.push(item);\n    continue;\n  }\n\n  if (sc === 429 || sc >= 500) {\n    // ⏳ Retryable error\n    if (retryCount < maxRetries) {\n      const base = sc === 429 ? 1000 : 2000;             // base wait\n      const jitter = Math.floor(Math.random() * base);   // add randomness\n      item.json.waitMs = base + jitter;\n      item.json.retryCount = retryCount + 1;\n      item.json.result = \"retry\";\n      out.push(item);\n      continue;\n    }\n  }\n\n  // ❌ Fatal / too many retries / other errors\n  item.json.result = \"drop\";\n  out.push(item);\n}\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4256,
+        3952
+      ],
+      "id": "13d62e7d-36a0-4220-aebb-219f45fa0ae1",
+      "name": "Check HTTP Result and Retry4"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4672,
+        4112
+      ],
+      "id": "a6d19db8-bda2-40ed-9989-75b421453940",
+      "name": "Wait5",
+      "webhookId": "7c83d998-e1dc-4f95-9dfc-170ff2ee10b5"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        4672,
+        3808
+      ],
+      "id": "1f6b56c7-9d2e-4719-92a8-9919136e3e0e",
+      "name": "✅ Message Sent (End)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b9e9aa90-fd45-49f7-8f26-ecc45e2106d0",
+              "leftValue": "={{ $json.room_existence }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -2752,
+        4480
+      ],
+      "id": "ff9d1399-c5e1-479a-9ae3-49f6c27ef1d8",
+      "name": "if user exist in table"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Login Retry Handler\n * Simplifies the login retry logic into one place.\n * Handles: success, retry (up to maxRetries), failure.\n */\n\nconst out = [];\nfor (const item of items) {\n  const sc = Number(item.json.statusCode || 0);\n  const retryCount = Number(item.json.retryCount || 0);\n  const maxRetries = 3;\n\n  // ✅ Success\n  if (sc === 200 && item.json.body?.access_token) {\n    item.json.result = 'ok';\n    out.push(item);\n    continue;\n  }\n\n  // ⏳ Retry on 429, 5xx, or network issues\n  if ((sc === 429 || sc >= 500 || sc === 0) && retryCount < maxRetries) {\n    const waitMs = 1000 * Math.pow(2, retryCount) + Math.floor(Math.random() * 500); // exponential backoff + jitter\n    item.json.result = 'retry';\n    item.json.waitMs = waitMs;\n    item.json.retryCount = retryCount + 1;\n    out.push(item);\n    continue;\n  }\n\n  // ❌ Hard failure (bad credentials or exhausted retries)\n  item.json.result = 'fail';\n  item.json.errorReason = sc !== 200 ? `Login failed (status ${sc})` : 'No token in response';\n  out.push(item);\n}\n\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4816,
+        4304
+      ],
+      "id": "a28a09ab-6055-4f15-9ad4-89c2a79aec6d",
+      "name": "Login Retry Handler"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "89de1931-76b5-4930-8ba3-736154bfbf4f",
+              "name": "access_token",
+              "value": "={{ $('Jira user to Matrix user').last().json.access_token }}",
+              "type": "string"
+            },
+            {
+              "id": "7ee0eb97-8d76-4cf4-a8bb-a52831576c8f",
+              "name": "room_id",
+              "value": "={{ $json.room_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        64,
+        4192
+      ],
+      "id": "95034c27-01bd-46f4-a9f4-0acebb3f5a09",
+      "name": "Attach Auth"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "ok",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "37e16076-bd4c-440c-b196-f670891ccd17"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ok"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a0a2b018-ea9e-4801-b60c-6821f01d835c",
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "drop",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "drop"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "dd8579d7-0ad2-43aa-ba2d-dba35d49aff3",
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "retry",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "retry"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        4448,
+        3936
+      ],
+      "id": "f6d69d91-0f9d-43cb-a428-960c7cc36c9a",
+      "name": "Handle Send Result",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        4672,
+        3952
+      ],
+      "id": "06303d65-3122-41c3-adaf-06bc0d535d7d",
+      "name": "❌Dropped (Send Failed)"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "ok",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "37e16076-bd4c-440c-b196-f670891ccd17"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ok"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a0a2b018-ea9e-4801-b60c-6821f01d835c",
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "drop",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "drop"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "dd8579d7-0ad2-43aa-ba2d-dba35d49aff3",
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "retry",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "retry"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -1936,
+        4480
+      ],
+      "id": "659f7db7-6778-40dc-85e0-16b1d33da1a4",
+      "name": "Handle Profile Result",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {},
+      "id": "2b298faf-351b-40c7-b41d-210a43756207",
+      "name": "❌Dropped (Rooms Fetch Failed)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -176,
+        4368
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "ok",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "37e16076-bd4c-440c-b196-f670891ccd17"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ok"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a0a2b018-ea9e-4801-b60c-6821f01d835c",
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "drop",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "drop"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "dd8579d7-0ad2-43aa-ba2d-dba35d49aff3",
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "retry",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "retry"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        2464,
+        4176
+      ],
+      "id": "01683aef-828d-475b-be23-bb144ba6ce69",
+      "name": "Handle Create Result",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {},
+      "id": "ffd48536-ddf5-4362-a6b1-ea1ae9576a4a",
+      "name": "❌Dropped (Room Creation Failed)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2688,
+        4096
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "v4Ohs2X4BSBcHkIi",
+          "mode": "list",
+          "cachedResultName": "MatrixAccessToken",
+          "cachedResultUrl": "/projects/AmDelcKINuc4Fqth/datatables/v4Ohs2X4BSBcHkIi"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "user_id",
+              "condition": "ilike",
+              "keyValue": "={{ '@jira:{{MATRIX_DOMAIN}}' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        -6416,
+        4016
+      ],
+      "id": "25e88e0a-19ef-4d74-b687-284a59ac3492",
+      "name": "Get Stored Access Token",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2f1f6db9-26d6-48ec-9cab-dca913a7fec2",
+              "leftValue": "={{ $json.access_token }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -6208,
+        4016
+      ],
+      "id": "da7b9a7c-d3c1-4d9f-a11a-0e31861536ac",
+      "name": "Has Stored Token?"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "74f71f3e-c720-4105-8685-389a35c4d8ce",
+              "name": "access_token",
+              "value": "={{ $json.access_token }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -5952,
+        3952
+      ],
+      "id": "435bf518-0902-4308-9ce7-f471afa04182",
+      "name": "Set Stored Token"
+    },
+    {
+      "parameters": {},
+      "id": "7c71b9f9-b9c7-4c78-9210-fbe212ad48ac",
+      "name": "❌Dropped (User Not Exist)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -4224,
+        4304
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{MATRIX_BASE_URL}}/_matrix/client/v3/account/whoami\n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{MATRIX_ACCESS_TOKEN}}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -5776,
+        4080
+      ],
+      "id": "f1510ea4-c56c-4090-a402-a8ae78420c27",
+      "name": "Test Stored Token",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\n\nfor (const item of items) {\n  // Process only items that have a valid statusCode\n  if (!('statusCode' in item.json)) continue;\n\n  const sc = Number(item.json.statusCode || 0);\n  console.log(`Token test: status=${sc}`);\n\n  if (sc === 200) {\n    item.json.result = \"ok\";\n  } else if (sc === 401 && item.json.body?.errcode === \"M_UNKNOWN_TOKEN\") {\n    item.json.result = \"invalid\";\n  } else {\n    item.json.result = \"fail\";\n    item.json.errorReason = `Unexpected response: status=${sc}`;\n  }\n\n  out.push(item);\n}\n\n// If no HTTP item found, return one fail for safety\nreturn out.length ? out : [{ json: { result: \"fail\", reason: \"No HTTP response\" } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5456,
+        4048
+      ],
+      "id": "fa91a810-2072-46c9-a405-e8b678591128",
+      "name": "Check Token Validity"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cdfc2306-087c-463a-9f01-5050b8a65aca",
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "fail",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "fail"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "ok",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "7b30d94b-6eac-4700-8189-13c5b91016c8"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ok"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "025b1785-de1b-419a-b789-83b51c6a1434",
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "invalid",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "invalid"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -5248,
+        4032
+      ],
+      "id": "0e9f5526-402e-4e8e-bac5-33101b37c5cf",
+      "name": "Handle Token Result"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "ok",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "7b30d94b-6eac-4700-8189-13c5b91016c8"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ok"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "025b1785-de1b-419a-b789-83b51c6a1434",
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "fail",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "fail"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cdfc2306-087c-463a-9f01-5050b8a65aca",
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "retry",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "retry"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -4640,
+        4288
+      ],
+      "id": "67d1ef09-c51c-48fc-a62e-4a3cdf9b6024",
+      "name": "Handle Login Result"
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "v4Ohs2X4BSBcHkIi",
+          "mode": "list",
+          "cachedResultName": "MatrixAccessToken",
+          "cachedResultUrl": "/projects/AmDelcKINuc4Fqth/datatables/v4Ohs2X4BSBcHkIi"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "user_id",
+              "condition": "ilike",
+              "keyValue": "={{ $json.body.user_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_id": "={{ '@jira:{{MATRIX_DOMAIN}}' }}",
+            "access_token": "={{ $json.body.access_token }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "access_token",
+              "displayName": "access_token",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        -4224,
+        4160
+      ],
+      "id": "3918ae65-3b33-4c98-8fd9-9573bc8ff3de",
+      "name": "Store New Access Token"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Unified HTTP response handler for Matrix/Jira requests\n * Handles success, rate-limit, server error, and fatal errors in one node.\n * \n * Expected input: each item has { statusCode, body, headers?, retryCount?, maxRetries? }\n * Returns:\n *   - on success → same item, with `result: \"ok\"`\n *   - on retry → same item, with `result: \"retry\"`, `waitMs` set (ms to sleep)\n *   - on fatal → same item, with `result: \"drop\"`\n */\n\nconst out = [];\n\nfor (const item of items) {\n  const sc = Number(item.json.statusCode || 0);\n  const retryCount = Number(item.json.retryCount || 0);\n  const maxRetries = Number(item.json.maxRetries || 3);\n\n  if ([200, 201, 202].includes(sc)) {\n    // ✅ Success\n    item.json.result = \"ok\";\n    out.push(item);\n    continue;\n  }\n\n  if (sc === 404) {\n    // ❌ Explicit drop for not found (e.g., user profile)\n    item.json.result = \"drop\";\n    out.push(item);\n    continue;\n  }\n\n  if (sc === 429 || sc >= 500) {\n    // ⏳ Retryable error\n    if (retryCount < maxRetries) {\n      const base = sc === 429 ? 1000 : 2000;             // base wait\n      const jitter = Math.floor(Math.random() * base);   // add randomness\n      item.json.waitMs = base + jitter;\n      item.json.retryCount = retryCount + 1;\n      item.json.result = \"retry\";\n      out.push(item);\n      continue;\n    }\n  }\n\n  // ❌ Fatal / too many retries / other errors\n  item.json.result = \"drop\";\n  out.push(item);\n}\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2112,
+        4496
+      ],
+      "id": "9778fdeb-9f23-453c-995e-9bb733ac9c03",
+      "name": "Check HTTP Result"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -5616,
+        3968
+      ],
+      "id": "369e7642-554a-4a5f-a7ed-7d2ad387144d",
+      "name": "Merge DATA"
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -4000,
+        3872
+      ],
+      "id": "85f9857d-1025-4450-9df2-279a53686805",
+      "name": "Merge access token DATA"
+    },
+    {
+      "parameters": {
+        "amount": "={{ ($json.staggerDelay || 0) / 1000 + Math.floor(Math.random() * 2) + 1 }}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1776,
+        4192
+      ],
+      "id": "ac4bef6a-f84e-40dc-a4e9-15c90c712349",
+      "name": "random wait",
+      "webhookId": "a042ebfd-8687-4dfd-b027-453eea893fca"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect and deduplicate data by txnId\n// Preserve all unique message sends\n\nconst seenTxn = new Set();\nconst deduped = [];\n\nfor (const item of items) {\n  const txnId = item.json.txnId;\n  const matrixUser = item.json.matrixUser;\n  \n  if (!txnId) {\n    console.log(`⚠️ Item missing txnId, skipping`);\n    continue;\n  }\n  \n  if (seenTxn.has(txnId)) {\n    console.log(`✓ Deduped: ${txnId} (already processed)`);\n    continue;\n  }\n  \n  seenTxn.add(txnId);\n  deduped.push(item);\n  \n  console.log(`✓ Collected: ${matrixUser} (${item.json.recipientRole}) - txnId: ${txnId}`);\n}\n\nconsole.log(`✓ Total unique messages to send: ${deduped.length}`);\n\nreturn deduped.length > 0 ? deduped : [{ json: { error: \"No items to process\" } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3824,
+        3952
+      ],
+      "id": "dd60fcd4-38f3-4760-9677-3446415eaedd",
+      "name": "Collect DATA"
+    },
+    {
+      "parameters": {
+        "content": "# 🟢 Jira Webhook → Matrix Access Token Manager\n\n## This section handles **Matrix access tokens for Jira users**.  \n\n## **Flow Summary:**  \n## 1. Receives Jira webhook events (`comment_created`, etc.)  \n## 2. Checks if a **valid Matrix access token** exists in the datastore  \n## 3. ✅ If valid → uses it  \n## 4. ❌ If missing/invalid → logs in via Matrix API, **retrieves new token**, stores it  \n## 5. Implements **retry logic with exponential backoff** for failed logins  \n\n## **Purpose:** Ensures seamless, **automated Matrix authentication** for Jira-triggered notifications.  \n",
+        "height": 1696,
+        "width": 2704,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -6752,
+        3200
+      ],
+      "id": "5bdc6a40-a411-4aa4-8da5-fc79dbd2f685",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "# 🔹 Matrix User Profile Handler\n\n## **Purpose:**  \n## This workflow section converts incoming Jira users into Matrix usernames, checks if the Matrix profile exists, and handles HTTP responses intelligently.\n\n## **Flow Highlights:**  \n## 1. **Jira user → Matrix user** (`Jira user to Matrix user`)  \n   ### - Extracts email/username from Jira payload  \n   ### - Generates sanitized Matrix username (`@user:{{MATRIX_DOMAIN}}`)  \n   ### - Prepares message, txnId, and includes `access_token`\n\n## 2. **Check Data Table** (`Get row(s)` + `Merge DATA + cache`)  \n   ### - Looks for existing cached Matrix users and room IDs  \n\n## 3. **Profile Verification** (`Check Matrix Profile` → `Check HTTP Result` → `Handle Profile Result`)  \n   ### - GET request to Matrix API to verify user profile  \n   ### - Handles success, 404 (drop), retryable errors (429/5xx)  \n   ### - Uses wait node (`Wait1`) for retry backoff  \n\n## 4. **Decision Nodes** (`Profile Exists?`, `Dropped (User Not Exist)`, `if user exist in table`)  \n   ### - Routes based on profile existence and cached data  \n\n## **Key Notes:**  \n   ### - Retry logic with jitter ensures robustness against rate limits  \n   ### - Outputs include `matrixUser`, `jiraUsername`, `message`, `txnId`, and `issueKey`  \n   ### - Non-existent users are explicitly dropped  \n\n## **Sticky Summary:**  \n## > Automates Matrix profile verification for Jira users, with caching, retry, and error handling.\n",
+        "height": 1696,
+        "width": 2416
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -3776,
+        3200
+      ],
+      "id": "f0aa7104-f573-49d2-b72f-53f336e5e438",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "#  🟢  Matrix Direct Chat Workflow\n\n## 📂 Get Jira User Rooms\n### Fetches rooms the Jira bot has joined; handles retries & errors.\n\n## 🔀 Split & Attach Auth\n### Splits `joined_rooms` array and assigns access token & room_id for downstream nodes.\n\n## 👥 Get Room Members\n### Retrieves members of each room to identify direct chats with the target user.\n\n## 🔍 Filter Direct Chats\n### Keeps only rooms with exactly 2 members (Jira bot + target user).\n\n## 🏗 Room Found or Create?\n### If a direct chat exists → cache room_id; otherwise → trigger new room creation.\n\n## 🆕 Create Room\n### Creates a trusted private chat and invites the target user.\n\n## 💾 Cache & Set room_id\n### Stores room_id in the data table and prepares it for sending messages.\n\n## 🔗 Merge & Wait\n### Combines creation branches and adds a random wait to prevent collisions.\n\n## 💡 Note\n### Ensures Jira notifications reach users via direct Matrix chats, with automated retries, caching, and room creation.",
+        "height": 1696,
+        "width": 4176,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1088,
+        3200
+      ],
+      "id": "92c9345a-3783-43c0-a1dc-10f7ea301e08",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "# ✉️ Send Message to Matrix DM\n\n## Purpose\n### Send Jira updates to Matrix direct messages reliably.\n\n## Features\n### - ✅ Sends message to target DM  \n### - ⏳ Handles retries for rate-limits & server errors  \n### - ❌ Drops messages after max retries  \n### - 💾 Collects data & tracks txnId  \n\n## Flow\n### 1. Collect data → Send message  \n### 2. Check HTTP result → Retry / Drop / Success  \n### 3. Wait on retry → Resend  \n### 4. End nodes indicate success ✅ or failure ❌\n",
+        "height": 1696,
+        "width": 1840,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3344,
+        3200
+      ],
+      "id": "e83ac9e6-d413-47f5-ae0d-47daf9eb360e",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "### 💾 Set Room ID from Table\n### Purpose\n### This node assigns all necessary data to each item before sending a message. It pulls values from cached or previously processed nodes to ensure that the message is correctly routed.  \n\n### Details\n### - **room_id**: Retrieved from the `Get row(s)` node, representing the target Matrix room.  \n### - **message**: The text message to send, coming from the `Jira user to Matrix user` node.  \n### - **txnId**: Transaction ID for tracking message delivery.  \n### - **matrixUser**: The recipient Matrix username.  \n### - **access_token**: Matrix bot access token, retrieved from the `Merge access token DATA` node.  \n\n### Functionality\n### This node ensures that all required information (room, recipient, message, auth) is packaged into the item for the final message-sending node. It centralizes data so that downstream nodes can operate without additional lookups.  \n### Essentially, it prepares a \"ready-to-send\" payload for Matrix messages, bridging cached data and message delivery in the workflow.\n",
+        "height": 2880,
+        "width": 3664,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -928,
+        -160
+      ],
+      "id": "71ad0079-c718-4679-a70e-572550441116",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\n\nfor (const item of items) {\n  const roomId = item.json.room_id || null;\n\n  results.push({\n    json: {\n      ...item.json,\n      room_existence: !!roomId,\n    },\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2928,
+        4480
+      ],
+      "id": "807206c6-f23f-437c-a559-9134a36e0b5f",
+      "name": "Room Existence"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "ok",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "37e16076-bd4c-440c-b196-f670891ccd17"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ok"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a0a2b018-ea9e-4801-b60c-6821f01d835c",
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "drop",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "drop"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "dd8579d7-0ad2-43aa-ba2d-dba35d49aff3",
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "retry",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "retry"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -432,
+        4352
+      ],
+      "id": "63b05e6b-967b-4e7c-8f36-d8e17ffa4c2f",
+      "name": "Handle Jira Rooms Result",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.result}}",
+                    "rightValue": "ok",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "d60f31d9-8720-42db-8f49-2def9b3a5231"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ok"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "3d278cce-6e86-475f-832a-28926dc2c09e",
+                    "leftValue": "={{$json.result}}",
+                    "rightValue": "createRoom",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "createRoom"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "9435168a-e547-4c8e-b4f4-970f64b97bd5",
+                    "leftValue": "={{$json.result}}",
+                    "rightValue": "retry",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "retry"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        880,
+        4176
+      ],
+      "id": "df44157b-17a5-4c45-a5c4-eb589c70a9ea",
+      "name": "Handle Room Members Result"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d0895cad-d2e4-4a25-b163-2b9c897c0609",
+              "name": "matrixUser",
+              "value": "={{ $('if user exist in table').item.json.matrixUser }}",
+              "type": "string"
+            },
+            {
+              "id": "75ed7547-a023-4f1b-b14d-f34a3067c0f6",
+              "name": "access_token",
+              "value": "={{ $('if user exist in table').item.json.access_token }}",
+              "type": "string"
+            },
+            {
+              "id": "6009429a-4cfc-4751-82a9-d7afd2d1d028",
+              "name": "message",
+              "value": "={{ $('if user exist in table').item.json.message }}",
+              "type": "string"
+            },
+            {
+              "id": "a8be1bb1-c4ee-4cdf-abf8-48ad2747359f",
+              "name": "txnId",
+              "value": "={{ $('if user exist in table').item.json.txnId }}",
+              "type": "string"
+            },
+            {
+              "id": "ead89154-461b-4b6d-95d2-49890dc0ce16",
+              "name": "email",
+              "value": "={{ $('if user exist in table').item.json.email }}",
+              "type": "string"
+            },
+            {
+              "id": "15004b8a-65de-4115-8bb4-be1c40ed91a3",
+              "name": "statusCode",
+              "value": "={{ $json.statusCode }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2288,
+        4496
+      ],
+      "id": "afbb3a20-fc71-4561-bbdc-8463ae9639e2",
+      "name": "Preserve after Profile Check"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d0895cad-d2e4-4a25-b163-2b9c897c0609",
+              "name": "matrixUser",
+              "value": "={{ $('Profile Exists?').item.json.matrixUser }}",
+              "type": "string"
+            },
+            {
+              "id": "75ed7547-a023-4f1b-b14d-f34a3067c0f6",
+              "name": "access_token",
+              "value": "={{ $('Profile Exists?').item.json.access_token }}",
+              "type": "string"
+            },
+            {
+              "id": "6009429a-4cfc-4751-82a9-d7afd2d1d028",
+              "name": "message",
+              "value": "={{ $('Profile Exists?').item.json.message }}",
+              "type": "string"
+            },
+            {
+              "id": "a8be1bb1-c4ee-4cdf-abf8-48ad2747359f",
+              "name": "txnId",
+              "value": "={{ $('Profile Exists?').item.json.txnId }}",
+              "type": "string"
+            },
+            {
+              "id": "ead89154-461b-4b6d-95d2-49890dc0ce16",
+              "name": "email",
+              "value": "={{ $('Profile Exists?').item.json.email }}",
+              "type": "string"
+            },
+            {
+              "id": "6bfe3ddc-1b6c-4f6f-aa58-365bc4a9a2ee",
+              "name": "statusCode",
+              "value": "={{ $json.statusCode }}",
+              "type": "number"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -816,
+        4368
+      ],
+      "id": "6e842fad-f878-41df-a258-043b26586432",
+      "name": "Preserve after Jira Rooms"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d0895cad-d2e4-4a25-b163-2b9c897c0609",
+              "name": "matrixUser",
+              "value": "={{ $('Attach Auth').item.json.matrixUser }}",
+              "type": "string"
+            },
+            {
+              "id": "75ed7547-a023-4f1b-b14d-f34a3067c0f6",
+              "name": "access_token",
+              "value": "={{ $('Attach Auth').item.json.access_token }}",
+              "type": "string"
+            },
+            {
+              "id": "6009429a-4cfc-4751-82a9-d7afd2d1d028",
+              "name": "message",
+              "value": "={{ $('Attach Auth').item.json.message }}",
+              "type": "string"
+            },
+            {
+              "id": "a8be1bb1-c4ee-4cdf-abf8-48ad2747359f",
+              "name": "txnId",
+              "value": "={{ $('Attach Auth').item.json.txnId }}",
+              "type": "string"
+            },
+            {
+              "id": "ead89154-461b-4b6d-95d2-49890dc0ce16",
+              "name": "email",
+              "value": "={{ $('Attach Auth').item.json.email }}",
+              "type": "string"
+            },
+            {
+              "id": "e26e53c1-6394-403e-9256-f194f2d08225",
+              "name": "statusCode",
+              "value": "={{ $json.statusCode }}",
+              "type": "number"
+            },
+            {
+              "id": "fbe1b442-253b-4aac-b82f-8fd4a98b9a67",
+              "name": "room_id",
+              "value": "={{ $('Attach Auth').item.json.room_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        464,
+        4192
+      ],
+      "id": "df8183c6-439f-4e29-ac9e-7ccff49bbe72",
+      "name": "Preserve after Room Members"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d0895cad-d2e4-4a25-b163-2b9c897c0609",
+              "name": "matrixUser",
+              "value": "={{ $('random wait').item.json.matrixUser }}",
+              "type": "string"
+            },
+            {
+              "id": "75ed7547-a023-4f1b-b14d-f34a3067c0f6",
+              "name": "access_token",
+              "value": "={{ $('random wait').item.json.access_token }}",
+              "type": "string"
+            },
+            {
+              "id": "6009429a-4cfc-4751-82a9-d7afd2d1d028",
+              "name": "message",
+              "value": "={{ $('random wait').item.json.message }}",
+              "type": "string"
+            },
+            {
+              "id": "a8be1bb1-c4ee-4cdf-abf8-48ad2747359f",
+              "name": "txnId",
+              "value": "={{ $('random wait').item.json.txnId }}",
+              "type": "string"
+            },
+            {
+              "id": "ead89154-461b-4b6d-95d2-49890dc0ce16",
+              "name": "email",
+              "value": "={{ $('random wait').item.json.email }}",
+              "type": "string"
+            },
+            {
+              "id": "11823360-c6d3-46b8-b791-f50a19ac4d81",
+              "name": "statusCode",
+              "value": "={{ $json.statusCode }}",
+              "type": "number"
+            },
+            {
+              "id": "d658d0f4-dc45-49fa-9cca-03f5e278e696",
+              "name": "room_id",
+              "value": "={{ $json.body.room_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2096,
+        4192
+      ],
+      "id": "ca57da44-8b3c-4f6e-85e3-d1a1c0100b85",
+      "name": "Preserve after Create"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "vhi9aOU26TGEWQgz",
+          "mode": "list",
+          "cachedResultName": "matrixUsers and RoomIDs",
+          "cachedResultUrl": "/projects/AmDelcKINuc4Fqth/datatables/vhi9aOU26TGEWQgz"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "matrixUser",
+              "condition": "ilike",
+              "keyValue": "={{ '%' + $json.matrixUser.replace(/^@/, '') + '%' }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        -3376,
+        4576
+      ],
+      "id": "f65fb15b-148b-436e-b1b4-3c1c18cb9387",
+      "name": "Get room_id and user from data table",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9876ef1a-5892-4b63-8855-fa12eed8fa55",
+              "name": "original",
+              "value": "={{ $json }}",
+              "type": "object"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -3376,
+        4416
+      ],
+      "id": "5064697f-f174-4257-a5ca-25113a307bda",
+      "name": "Preserve Original"
+    },
+    {
+      "parameters": {
+        "mode": "combineBySql",
+        "query": "SELECT\n  i1.matrixUser,\n  i1.message,\n  i1.txnId,\n  i1.email,\n  i1.issueKey,\n  i1.eventType,\n  i1.assigneeName,\n  i1.reporterName,\n  i2.room_id,\n  CASE WHEN i2.room_id IS NOT NULL THEN true ELSE false END AS room_existence\nFROM\n  input1 AS i1\nLEFT JOIN\n  input2 AS i2\nON\n  REPLACE(LOWER(i1.matrixUser), '@', '') LIKE '%' || REPLACE(LOWER(i2.matrixUser), '@', '') || '%';\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -3120,
+        4480
+      ],
+      "id": "45addb9e-69c9-4f0c-b0a1-ff010ae7568d",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "df284903-8c43-45e2-8da6-9c2271a0404e",
+              "leftValue": "={{ $json.room_id }}",
+              "rightValue": true,
+              "operator": {
+                "type": "string",
+                "operation": "notExists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1472,
+        4000
+      ],
+      "id": "69691ebe-0319-42d5-b635-15ef68ffbc12",
+      "name": "No room_id? → Create"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "040a15c9-c0b5",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -6576,
+        3872
+      ],
+      "id": "bf66d977-e159-46cc-bec7-61e0b75c211e",
+      "name": "Webhook",
+      "webhookId": "040a15c9-c0b5"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Check Matrix Profile": {
+      "main": [
+        [
+          {
+            "node": "Preserve after Profile Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Profile Exists?": {
+      "main": [
+        [
+          {
+            "node": "Get Jira user Rooms",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Dropped (User Not Exist)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Room Members": {
+      "main": [
+        [
+          {
+            "node": "Preserve after Room Members",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preserve after Room Members",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Jira user Rooms": {
+      "main": [
+        [
+          {
+            "node": "Preserve after Jira Rooms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Room": {
+      "main": [
+        [
+          {
+            "node": "Preserve after Create",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jira user to Matrix user": {
+      "main": [
+        [
+          {
+            "node": "Preserve Original",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get room_id and user from data table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finding the room": {
+      "main": [
+        [
+          {
+            "node": "Filter Direct Chats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code for Splitting the Array": {
+      "main": [
+        [
+          {
+            "node": "Attach Auth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set room_id from Table": {
+      "main": [
+        [
+          {
+            "node": "Collect DATA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set room_id after creation": {
+      "main": [
+        [
+          {
+            "node": "Collect DATA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Direct Chats": {
+      "main": [
+        [
+          {
+            "node": "No room_id? → Create",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cache room_id in Table": {
+      "main": [
+        []
+      ]
+    },
+    "Update Data Table": {
+      "main": [
+        [
+          {
+            "node": "Set room_id after creation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Login and get access token": {
+      "main": [
+        [
+          {
+            "node": "Login Retry Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Login and get access token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Message to DM": {
+      "main": [
+        [
+          {
+            "node": "Check HTTP Result and Retry4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "Check Matrix Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check HTTP Result and Retry1": {
+      "main": [
+        [
+          {
+            "node": "Handle Room Members Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait2": {
+      "main": [
+        [
+          {
+            "node": "Get Room Members",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check HTTP Result and Retry2": {
+      "main": [
+        [
+          {
+            "node": "Handle Jira Rooms Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait3": {
+      "main": [
+        [
+          {
+            "node": "Get Jira user Rooms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check HTTP Result and Retry3": {
+      "main": [
+        [
+          {
+            "node": "Handle Create Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait4": {
+      "main": [
+        [
+          {
+            "node": "random wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check HTTP Result and Retry4": {
+      "main": [
+        [
+          {
+            "node": "Handle Send Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait5": {
+      "main": [
+        [
+          {
+            "node": "Send Message to DM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "if user exist in table": {
+      "main": [
+        [
+          {
+            "node": "Set room_id from Table",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Matrix Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Login Retry Handler": {
+      "main": [
+        [
+          {
+            "node": "Handle Login Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Auth": {
+      "main": [
+        [
+          {
+            "node": "Get Room Members",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Send Result": {
+      "main": [
+        [
+          {
+            "node": "✅ Message Sent (End)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❌Dropped (Send Failed)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Profile Result": {
+      "main": [
+        [
+          {
+            "node": "Profile Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Dropped (User Not Exist)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Create Result": {
+      "main": [
+        [
+          {
+            "node": "Update Data Table",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❌Dropped (Room Creation Failed)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Stored Token?": {
+      "main": [
+        [
+          {
+            "node": "Set Stored Token",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Login and get access token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Stored Access Token": {
+      "main": [
+        [
+          {
+            "node": "Has Stored Token?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Stored Token": {
+      "main": [
+        [
+          {
+            "node": "Test Stored Token",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge DATA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test Stored Token": {
+      "main": [
+        [
+          {
+            "node": "Merge DATA",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        []
+      ]
+    },
+    "Check Token Validity": {
+      "main": [
+        [
+          {
+            "node": "Handle Token Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Login Result": {
+      "main": [
+        [
+          {
+            "node": "Store New Access Token",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge access token DATA",
+            "type": "main",
+            "index": 2
+          }
+        ],
+        [
+          {
+            "node": "❌Dropped (User Not Exist)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Token Result": {
+      "main": [
+        [
+          {
+            "node": "Login and get access token",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge access token DATA",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Login and get access token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check HTTP Result": {
+      "main": [
+        [
+          {
+            "node": "Handle Profile Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge DATA": {
+      "main": [
+        [
+          {
+            "node": "Check Token Validity",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge access token DATA",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Merge access token DATA": {
+      "main": [
+        [
+          {
+            "node": "Jira user to Matrix user",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "random wait": {
+      "main": [
+        [
+          {
+            "node": "Create Room",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect DATA": {
+      "main": [
+        [
+          {
+            "node": "Send Message to DM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Room Existence": {
+      "main": [
+        [
+          {
+            "node": "if user exist in table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Jira Rooms Result": {
+      "main": [
+        [
+          {
+            "node": "Code for Splitting the Array",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❌Dropped (Rooms Fetch Failed)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Room Members Result": {
+      "main": [
+        [
+          {
+            "node": "Finding the room",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "random wait",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preserve after Profile Check": {
+      "main": [
+        [
+          {
+            "node": "Check HTTP Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preserve after Jira Rooms": {
+      "main": [
+        [
+          {
+            "node": "Check HTTP Result and Retry2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preserve after Room Members": {
+      "main": [
+        [
+          {
+            "node": "Check HTTP Result and Retry1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preserve after Create": {
+      "main": [
+        [
+          {
+            "node": "Check HTTP Result and Retry3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get room_id and user from data table": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Preserve Original": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Room Existence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No room_id? → Create": {
+      "main": [
+        [
+          {
+            "node": "random wait",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cache room_id in Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Merge access token DATA",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Stored Access Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "5a557a6e-09a5-423b-b918-5be3543be0c2",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d75811a97b26dfebf7cde6e1d517450a54868e8c671d97d2630abe25bcb42a8a"
+  },
+  "id": "fq8wSyVzguMeZYUt",
+  "tags": []
+}
